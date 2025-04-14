@@ -33,8 +33,15 @@ def buscar_por_similitud(usuario_id):
     resultados = vector_store.similarity_search(usuario_id, k=3)
     return [r.page_content for r in resultados]
 
-def guardar_en_historial(usuario_id, mensaje, tipo, producto):
-    data = {"usuario_id": usuario_id, "mensaje": mensaje, "tipo": tipo, "producto": producto}
+def guardar_en_historial(usuario_id, mensaje, tipo, producto, extra=None):
+    data = {
+        "usuario_id": usuario_id,
+        "mensaje": mensaje,
+        "tipo": tipo,
+        "producto": producto
+    }
+    if extra:
+        data.update(extra)
     try:
         supabase.table("interacciones").insert(data).execute()
     except Exception as e:
@@ -71,6 +78,33 @@ def registrar_venta_simulada(usuario_id, producto, estado="interesado", decision
         supabase.table("ventas").insert(data).execute()
     except Exception as e:
         print("❌ Error al registrar venta:", e)
+
+def check_si_ya_se_ofrecio_cierre(usuario_id, producto):
+    try:
+        response = supabase.table("interacciones") \
+            .select("id") \
+            .eq("usuario_id", usuario_id) \
+            .eq("producto", producto) \
+            .eq("respuesta_final_ofrecida", True) \
+            .limit(1) \
+            .execute()
+        return len(response.data) > 0
+    except Exception as e:
+        print("❌ Error verificando si ya se ofreció cierre:", e)
+        return False
+
+def obtener_historial_usuario(usuario_id, producto):
+    try:
+        response = supabase.table("interacciones") \
+            .select("mensaje, tipo") \
+            .eq("usuario_id", usuario_id) \
+            .eq("producto", producto) \
+            .order("created_at", desc=False) \
+            .execute()
+        return response.data or []
+    except Exception as e:
+        print("❌ Error obteniendo historial completo:", e)
+        return []
 
 def detectar_intencion_compra(mensaje_usuario):
     try:
@@ -113,27 +147,36 @@ def es_usuario_nuevo(usuario_id):
         return False
 
 def generar_respuesta_persuasiva(usuario_id, mensaje_usuario, producto):
-    # Guardar en Pinecone y Supabase
+    # Guardar mensaje del usuario
     guardar_mensaje_en_pinecone_avanzado(usuario_id, mensaje_usuario, producto=producto)
     guardar_en_historial(usuario_id, mensaje_usuario, tipo="usuario", producto=producto)
 
-    # Preparar contexto
-    historial = construir_contexto_conversacional(usuario_id)
+    # Cargar producto activo y contexto
     producto_info = obtener_producto_activo()
     if not producto_info:
         return "Actualmente no hay un producto activo para ofrecer."
 
+    historial = construir_contexto_conversacional(usuario_id)
     beneficios = "\n- " + "\n- ".join(producto_info["beneficios_secundarios"])
     objeciones = "\n- " + "\n- ".join(producto_info["posibles_objeciones"])
-    
-    namespace = producto.lower().replace(" ", "_")
-    refuerzo_semantico = buscar_pregunta_similar(mensaje_usuario, namespace=namespace)
-    
+
+    # Buscar refuerzo semántico
+    refuerzo_semantico = buscar_pregunta_similar(mensaje_usuario, namespace=producto_info["nombre"])
     refuerzo_txt = f"\n\nRespuesta sugerida: {refuerzo_semantico}" if refuerzo_semantico else ""
 
-    # Armar prompt
+    # Detectar si ya se ofreció el cierre
+    ya_ofrecido = check_si_ya_se_ofrecio_cierre(usuario_id, producto)
+
+    # Verificar intención de compra o turnos suficientes
+    decision, decision_texto = detectar_intencion_compra(mensaje_usuario)
+    historial_usuario = obtener_historial_usuario(usuario_id, producto)
+    cantidad_turnos = len(historial_usuario) // 2  # cada par usuario-bot
+
+    debe_incluir_cierre = not ya_ofrecido and (decision or cantidad_turnos >= 3)
+    cierre = f"\n\n{producto_info['llamado_a_la_accion']}" if debe_incluir_cierre else ""
+
     prompt = f"""
-Sos un asistente persuasivo que está ayudando a vender el producto \"{producto_info['nombre']}\"
+Sos un asistente persuasivo que está ayudando a vender el producto \"{producto_info['nombre']}\".
 Beneficio principal: {producto_info['beneficio_principal']}
 
 Otros beneficios:
@@ -150,11 +193,9 @@ Historial reciente del usuario:
 Nuevo mensaje del usuario:
 {mensaje_usuario}
 {refuerzo_txt}
-
-Terminá tu respuesta con: {producto_info['llamado_a_la_accion']}
+{cierre}
 """
 
-    # Generar respuesta con GPT
     try:
         client = OpenAI(api_key=OPENAI_API_KEY)
         response = client.chat.completions.create(
@@ -167,15 +208,20 @@ Terminá tu respuesta con: {producto_info['llamado_a_la_accion']}
         )
         mensaje_bot = response.choices[0].message.content.strip()
 
-        guardar_en_historial(usuario_id, mensaje_bot, tipo="bot", producto=producto)
+        guardar_en_historial(
+            usuario_id,
+            mensaje_bot,
+            tipo="bot",
+            producto=producto,
+            respuesta_final_ofrecida=debe_incluir_cierre
+        )
 
-        decision, decision_text = detectar_intencion_compra(mensaje_usuario)
         if decision:
             registrar_venta_simulada(
                 usuario_id,
                 producto=producto,
                 estado="interesado",
-                decision_gpt=decision_text
+                decision_gpt=decision_texto
             )
 
         return mensaje_bot
