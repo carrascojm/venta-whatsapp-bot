@@ -14,7 +14,7 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(PINECONE_INDEX_NAME)
 
-def buscar_pregunta_similar(mensaje_usuario, namespace="tarjeta_coto", umbral_similitud=0.35):
+def buscar_pregunta_similar(mensaje_usuario, namespace, umbral_similitud=0.35):
     """
     Dada una pregunta del usuario, busca en Pinecone si hay alguna FAQ similar.
     Si encuentra una con similitud suficiente, devuelve la respuesta sugerida.
