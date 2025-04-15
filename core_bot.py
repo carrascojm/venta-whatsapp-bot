@@ -33,15 +33,14 @@ def buscar_por_similitud(usuario_id):
     resultados = vector_store.similarity_search(usuario_id, k=3)
     return [r.page_content for r in resultados]
 
-def guardar_en_historial(usuario_id, mensaje, tipo, producto, extra=None):
+def guardar_en_historial(usuario_id, mensaje, tipo, producto, respuesta_final_ofrecida=False):
     data = {
         "usuario_id": usuario_id,
         "mensaje": mensaje,
         "tipo": tipo,
-        "producto": producto
+        "producto": producto,
+        "respuesta_final_ofrecida": respuesta_final_ofrecida
     }
-    if extra:
-        data.update(extra)
     try:
         supabase.table("interacciones").insert(data).execute()
     except Exception as e:
