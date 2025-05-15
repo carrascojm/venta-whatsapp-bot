@@ -42,10 +42,10 @@ def borrar_todo():
     os.system("python tools/tool_faq_pinecone_loader.py")
     print("✅ FAQ cargadas exitosamente.")
 
-def simular_dialogo(usuario_id, mensajes):
+def simular_dialogo(usuario_id, producto, mensajes):
     for mensaje in mensajes:
         print(f"\n📩 {usuario_id} dice: {mensaje}")
-        respuesta = generar_respuesta_persuasiva(usuario_id, mensaje)
+        respuesta = generar_respuesta_persuasiva(usuario_id, mensaje, producto)
         print(f"🤖 Bot responde: {respuesta[:200]}...\n")
         time.sleep(0.5)
 
@@ -82,12 +82,20 @@ mensajes_3 = [
     "¿Y si no la uso seguido? ¿Pierdo beneficios?"
 ]
 
+cliente_emocional_4 = "whatsapp:+5491130000004"
+mensajes_4 = [
+    "¡Quiero sacar la tarjeta ya! ¿Cómo hago?",
+    "Sí, sí, la quiero usar para aprovechar descuentos.",
+    "¡Dale, avancemos!"
+]
+
 # === Script principal ===
 if __name__ == "__main__":
     borrar_todo()
 
-    simular_dialogo(cliente_emocional_1, mensajes_1)
-    simular_dialogo(cliente_emocional_2, mensajes_2)
-    simular_dialogo(cliente_emocional_3, mensajes_3)
+    producto = "Tarjeta Cencopay"
+
+    simular_dialogo(cliente_emocional_1, producto, mensajes_1)
+    simular_dialogo(cliente_emocional_2, producto, mensajes_4)
 
     mostrar_datos_guardados()

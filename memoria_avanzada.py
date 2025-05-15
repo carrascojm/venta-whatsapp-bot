@@ -1,9 +1,10 @@
-import uuid
 import os
+import hashlib
 from openai import OpenAI
 from langchain_openai import OpenAIEmbeddings
 from pinecone import Pinecone
 from dotenv import load_dotenv
+from utils import generar_id_deterministico
 
 load_dotenv()
 
@@ -18,6 +19,13 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 embedder = OpenAIEmbeddings(model=EMBEDDING_MODEL, openai_api_key=OPENAI_API_KEY)
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(PINECONE_INDEX_NAME)
+
+def generar_id_vector_unico(usuario_id, mensaje):
+    """
+    Genera un ID único y determinístico combinando el número de usuario y un hash del mensaje.
+    """
+    hash_mensaje = hashlib.sha256(mensaje.encode("utf-8")).hexdigest()
+    return f"{usuario_id}_{hash_mensaje}"
 
 def extraer_topicos(mensaje):
     prompt = f"""
@@ -46,7 +54,9 @@ def guardar_mensaje_en_pinecone_avanzado(usuario_id, mensaje, producto):
     try:
         topicos = extraer_topicos(mensaje)
         vector = embedder.embed_query(mensaje)
-        vector_id = f"{usuario_id}_{uuid.uuid4()}"
+
+        vector_id = generar_id_deterministico(usuario_id, mensaje)
+
         metadata = {
             "usuario_id": usuario_id,
             "mensaje": mensaje,

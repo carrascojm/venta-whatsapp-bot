@@ -10,7 +10,7 @@ PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(PINECONE_INDEX_NAME)
 
-def mostrar_contenido(namespace="tarjeta_coto"):
+def mostrar_contenido(namespace="tarjeta_cencopay"):
     print(f"\n🧾 Listando contenido del namespace: {namespace}")
     try:
         stats = index.describe_index_stats()

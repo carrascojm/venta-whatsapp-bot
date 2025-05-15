@@ -1,12 +1,14 @@
 import os
+import hashlib
 from dotenv import load_dotenv
-from pinecone import Pinecone, ServerlessSpec
+from pinecone import Pinecone
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 from openai import OpenAI
 from supabase import create_client, Client
 from faq_semantica import buscar_pregunta_similar
 from memoria_avanzada import guardar_mensaje_en_pinecone_avanzado
+from utils import generar_id_deterministico
 
 load_dotenv()
 
@@ -15,9 +17,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_ENV = os.getenv("PINECONE_ENVIRONMENT")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
-PINECONE_REGION = os.getenv("PINECONE_REGION")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
 
 # Inicializar servicios
@@ -29,18 +29,30 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # === FUNCIONES PRINCIPALES ===
 
+def hash_mensaje(usuario_id, mensaje):
+    return hashlib.md5((usuario_id + mensaje.lower().strip()).encode()).hexdigest()
+
 def buscar_por_similitud(usuario_id):
     resultados = vector_store.similarity_search(usuario_id, k=3)
     return [r.page_content for r in resultados]
 
-def guardar_en_historial(usuario_id, mensaje, tipo, producto, respuesta_final_ofrecida=False):
+def guardar_en_historial(usuario_id, mensaje, tipo, producto, score_similitud=None, respuesta_final_ofrecida=None):
+    interaccion_id = generar_id_deterministico(usuario_id, mensaje)
+
     data = {
+        "id": interaccion_id,
         "usuario_id": usuario_id,
         "mensaje": mensaje,
         "tipo": tipo,
-        "producto": producto,
-        "respuesta_final_ofrecida": respuesta_final_ofrecida
+        "producto": producto
     }
+
+    if score_similitud is not None:
+        data["score_similitud"] = score_similitud
+
+    if respuesta_final_ofrecida is not None:
+        data["respuesta_final_ofrecida"] = respuesta_final_ofrecida
+
     try:
         supabase.table("interacciones").insert(data).execute()
     except Exception as e:
@@ -58,25 +70,53 @@ def construir_contexto_conversacional(usuario_id, max_turnos=5):
         historial = []
         for row in response.data:
             if row["tipo"] == "usuario":
-                historial.append(f"👤 Usuario: {row['mensaje']}")
+                historial.append(f"\U0001F464 Usuario: {row['mensaje']}")
             else:
-                historial.append(f"🤖 Bot: {row['mensaje']}")
+                historial.append(f"\U0001F916 Bot: {row['mensaje']}")
         return "\n".join(historial)
     except Exception as e:
         print("❌ Error al construir contexto:", e)
         return ""
 
-def registrar_venta_simulada(usuario_id, producto, estado="interesado", decision_gpt=None):
+def registrar_venta_simulada(usuario_id, producto, estado, decision_gpt):
+    """
+    Inserta o actualiza un registro de venta simulada en Supabase,
+    manteniendo siempre el último estado ("interesado" o "no_interesado").
+    """
+
     try:
-        data = {
-            "usuario_id": usuario_id,
-            "producto": producto,
-            "estado": estado,
-            "decision_gpt": decision_gpt
-        }
-        supabase.table("ventas").insert(data).execute()
+        # Verificar si ya existe una venta para este usuario
+        existing = supabase.table("ventas").select("*").eq("usuario_id", usuario_id).execute().data
+
+        if existing:
+            # Si existe, hacer un UPDATE con el nuevo estado
+            venta_id = existing[0]["id"]
+            response = supabase.table("ventas").update({
+                "producto": producto,
+                "estado": estado,
+                "decision_gpt": decision_gpt
+            }).eq("id", venta_id).execute()
+
+            if response.status_code == 200:
+                print(f"♻️ Venta actualizada para {usuario_id}: {estado} ({decision_gpt})")
+            else:
+                print(f"❌ Error actualizando venta: {response.data}")
+        else:
+            # Si no existe, hacer un INSERT
+            response = supabase.table("ventas").insert({
+                "usuario_id": usuario_id,
+                "producto": producto,
+                "estado": estado,
+                "decision_gpt": decision_gpt
+            }).execute()
+
+            if response.status_code == 201:
+                print(f"✅ Nueva venta registrada para {usuario_id}: {estado} ({decision_gpt})")
+            else:
+                print(f"❌ Error insertando venta: {response.data}")
+
     except Exception as e:
-        print("❌ Error al registrar venta:", e)
+        print(f"❌ Error registrando venta simulada: {e}")
 
 def check_si_ya_se_ofrecio_cierre(usuario_id, producto):
     try:
@@ -126,6 +166,27 @@ def detectar_intencion_compra(mensaje_usuario):
         print("❌ Error en detección de intención de compra:", e)
         return (False, "error")
 
+def detectar_tono_emocional(mensaje_usuario):
+    try:
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        system_prompt = (
+            "Tu tarea es analizar el siguiente mensaje de un usuario y devolver en una sola palabra su tono emocional dominante. "
+            "Usa palabras como: 'entusiasmado', 'dudoso', 'desconfiado', 'curioso', 'indiferente', 'emocionado', 'molesto', 'confundido'. "
+            "Respondé SOLO con una de esas palabras o la más cercana. Nada más."
+        )
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": mensaje_usuario}
+            ],
+            temperature=0
+        )
+        return response.choices[0].message.content.strip().lower()
+    except Exception as e:
+        print("❌ Error en detección de tono emocional:", e)
+        return "neutro"
+
 def obtener_producto_activo():
     try:
         response = supabase.table("productos").select("*").eq("activo", True).limit(1).execute()
@@ -146,53 +207,31 @@ def es_usuario_nuevo(usuario_id):
         return False
 
 def generar_respuesta_persuasiva(usuario_id, mensaje_usuario, producto):
-    # Guardar mensaje del usuario
-    guardar_mensaje_en_pinecone_avanzado(usuario_id, mensaje_usuario, producto=producto)
-    guardar_en_historial(usuario_id, mensaje_usuario, tipo="usuario", producto=producto)
-
-    # Cargar producto activo y contexto
+    # Obtener producto activo y su system_prompt
     producto_info = obtener_producto_activo()
     if not producto_info:
         return "Actualmente no hay un producto activo para ofrecer."
 
+    system_prompt = producto_info.get("prompt_system")
+    if not system_prompt:
+        return "No se encontró un prompt configurado para este producto."
+
+    # Preparar historial de conversación
     historial = construir_contexto_conversacional(usuario_id)
-    beneficios = "\n- " + "\n- ".join(producto_info["beneficios_secundarios"])
-    objeciones = "\n- " + "\n- ".join(producto_info["posibles_objeciones"])
 
-    # Buscar refuerzo semántico
-    refuerzo_semantico = buscar_pregunta_similar(mensaje_usuario, namespace=producto_info["nombre"])
-    refuerzo_txt = f"\n\nRespuesta sugerida: {refuerzo_semantico}" if refuerzo_semantico else ""
+    # Buscar pregunta similar (FAQ) si existe
+    refuerzo_semantico, score_similitud, origen_vector = buscar_pregunta_similar(mensaje_usuario, producto)
+    mostrar_refuerzo = refuerzo_semantico and origen_vector == "faq"
+    refuerzo_txt = f"\n\nRespuesta sugerida basada en preguntas frecuentes: {refuerzo_semantico}" if mostrar_refuerzo else ""
 
-    # Detectar si ya se ofreció el cierre
-    ya_ofrecido = check_si_ya_se_ofrecio_cierre(usuario_id, producto)
-
-    # Verificar intención de compra o turnos suficientes
-    decision, decision_texto = detectar_intencion_compra(mensaje_usuario)
-    historial_usuario = obtener_historial_usuario(usuario_id, producto)
-    cantidad_turnos = len(historial_usuario) // 2  # cada par usuario-bot
-
-    debe_incluir_cierre = not ya_ofrecido and (decision or cantidad_turnos >= 3)
-    cierre = f"\n\n{producto_info['llamado_a_la_accion']}" if debe_incluir_cierre else ""
-
-    prompt = f"""
-Sos un asistente persuasivo que está ayudando a vender el producto \"{producto_info['nombre']}\".
-Beneficio principal: {producto_info['beneficio_principal']}
-
-Otros beneficios:
-{beneficios}
-
-El usuario puede tener dudas como:
-{objeciones}
-
-Respondé con un estilo: {producto_info['estilo_comunicacion']}
-
-Historial reciente del usuario:
+    # Preparar el prompt dinámico para el usuario
+    prompt_usuario = f"""
+Historial reciente de la conversación:
 {historial}
 
-Nuevo mensaje del usuario:
+Nuevo mensaje del cliente:
 {mensaje_usuario}
 {refuerzo_txt}
-{cierre}
 """
 
     try:
@@ -200,30 +239,32 @@ Nuevo mensaje del usuario:
         response = client.chat.completions.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "Estás vendiendo de forma persuasiva y empática."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt_usuario}
             ],
             temperature=0.7
         )
         mensaje_bot = response.choices[0].message.content.strip()
 
-        guardar_en_historial(
-            usuario_id,
-            mensaje_bot,
-            tipo="bot",
+        # Guardar en Supabase y Pinecone
+        guardar_mensaje_en_pinecone_avanzado(usuario_id, mensaje_usuario, producto=producto)
+        guardar_en_historial(usuario_id, mensaje_usuario, tipo="usuario", producto=producto)
+        guardar_en_historial(usuario_id, mensaje_bot, tipo="bot", producto=producto, score_similitud=score_similitud)
+
+        # Detectar intención de compra y registrar lead SIEMPRE
+        decision_compra, _ = detectar_intencion_compra(mensaje_usuario)
+        estado_venta = "interesado" if decision_compra else "no_interesado"
+        decision_texto = "sí" if decision_compra else "no"
+
+        registrar_venta_simulada(
+            usuario_id=usuario_id,
             producto=producto,
-            respuesta_final_ofrecida=debe_incluir_cierre
+            estado=estado_venta,
+            decision_gpt=decision_texto
         )
 
-        if decision:
-            registrar_venta_simulada(
-                usuario_id,
-                producto=producto,
-                estado="interesado",
-                decision_gpt=decision_texto
-            )
-
         return mensaje_bot
+
     except Exception as e:
         print("❌ Error generando respuesta:", e)
         return "Hubo un error al procesar tu mensaje. Por favor intentá nuevamente."
