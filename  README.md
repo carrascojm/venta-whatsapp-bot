@@ -27,3 +27,6 @@ Este proyecto es un asistente virtual de ventas desarrollado por **LeonoAI**. El
    ```bash
    git clone https://github.com/tu-usuario/tu-repo.git
    cd tu-repo
+
+
+##MODO LOCAL CON NGROK

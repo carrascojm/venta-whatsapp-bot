@@ -37,21 +37,27 @@ def test_similitud_usuario():
 
             print(f"\n📊 Matches encontrados: {len(res.matches)}")
 
+            if not res.matches:
+                print("❌ Ninguna pregunta similar relevante encontrada.")
+                continue
+
             for match in res.matches:
                 metadata = match.metadata
-                if metadata and "respuesta" in metadata:
-                    score = match.score
-                    pregunta_faq = metadata.get("pregunta")
-                    respuesta_sugerida = metadata.get("respuesta")
-
-                    print(f"📋 Metadata crudo recibido:\n{metadata}")
-                    print(f"📊 Score obtenido: {score:.4f}")
-                    print("✅ Pregunta similar encontrada:")
-                    print(f"🧠 Pregunta FAQ: {pregunta_faq}")
-                    print(f"💬 Respuesta sugerida: {respuesta_sugerida}")
-                    break
-            else:
-                print("❌ Ninguna pregunta similar relevante encontrada.")
+                score = match.score
+                pregunta_faq = metadata.get("pregunta", "N/A")
+                respuesta_sugerida = metadata.get("respuesta", "N/A")
+                beneficios = metadata.get("beneficios_clave", [])
+                tags = metadata.get("tags", [])
+    
+                print(f"\n--- Match con Score: {score:.4f} (ID: {match.id}) ---")
+                print(f"🧠 Pregunta FAQ: {pregunta_faq}")
+                print(f"💬 Respuesta Sugerida: {respuesta_sugerida}")
+                if beneficios:
+                    print(f"💡 Beneficios Clave: {', '.join(beneficios)}")
+                if tags:
+                    print(f"🏷️ Tags: {', '.join(tags)}")
+                # Considera mostrar todos los top_k resultados para un mejor análisis durante el testeo
+                # break 
 
         except Exception as e:
             print("❌ Error al buscar similitud:", e)

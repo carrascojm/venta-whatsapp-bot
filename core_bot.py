@@ -5,6 +5,7 @@ from pinecone import Pinecone
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 from openai import OpenAI
+from postgrest.exceptions import APIError as PostgrestAPIError
 from supabase import create_client, Client
 from faq_semantica import buscar_pregunta_similar
 from memoria_avanzada import guardar_mensaje_en_pinecone_avanzado
@@ -86,37 +87,45 @@ def registrar_venta_simulada(usuario_id, producto, estado, decision_gpt):
 
     try:
         # Verificar si ya existe una venta para este usuario
-        existing = supabase.table("ventas").select("*").eq("usuario_id", usuario_id).execute().data
+        existing_response = supabase.table("ventas").select("id").eq("usuario_id", usuario_id).limit(1).execute()
+        existing_data = existing_response.data
 
-        if existing:
+        if existing_data:
             # Si existe, hacer un UPDATE con el nuevo estado
-            venta_id = existing[0]["id"]
+            venta_id = existing_data[0]["id"]
             response = supabase.table("ventas").update({
                 "producto": producto,
                 "estado": estado,
                 "decision_gpt": decision_gpt
             }).eq("id", venta_id).execute()
 
-            if response.status_code == 200:
+            if response.data: # supabase-py v2 devuelve los registros actualizados en .data
                 print(f"♻️ Venta actualizada para {usuario_id}: {estado} ({decision_gpt})")
             else:
-                print(f"❌ Error actualizando venta: {response.data}")
+                # Éxito HTTP, pero no se devolvieron datos de la actualización.
+                # Podría ser RLS, o que la fila no fue encontrada por ID (menos probable si existing_data fue encontrado).
+                print(f"⚠️ Venta actualizada (o no encontrada/visible para actualizar), no se retornaron datos. Usuario: {usuario_id}. Estado HTTP OK. Datos: {response.data}")
         else:
             # Si no existe, hacer un INSERT
-            response = supabase.table("ventas").insert({
+            # insert espera una lista de diccionarios
+            response = supabase.table("ventas").insert([{
                 "usuario_id": usuario_id,
                 "producto": producto,
                 "estado": estado,
-                "decision_gpt": decision_gpt
-            }).execute()
+                "decision_gpt": decision_gpt,
+            }]).execute()
 
-            if response.status_code == 201:
+            if response.data: # supabase-py v2 devuelve los registros insertados en .data
                 print(f"✅ Nueva venta registrada para {usuario_id}: {estado} ({decision_gpt})")
             else:
-                print(f"❌ Error insertando venta: {response.data}")
+                # Éxito HTTP, pero no se devolvieron datos de la inserción.
+                # Podría ser RLS u otras condiciones que no son errores.
+                print(f"⚠️ Venta insertada, pero no se retornaron datos. Usuario: {usuario_id}. Estado HTTP OK. Datos: {response.data}")
 
+    except PostgrestAPIError as e:
+        print(f"❌ Error de PostgREST registrando venta simulada para {usuario_id}: {e.message} (Code: {getattr(e, 'code', 'N/A')}, Details: {getattr(e, 'details', 'N/A')})")
     except Exception as e:
-        print(f"❌ Error registrando venta simulada: {e}")
+        print(f"❌ Excepción general registrando venta simulada para {usuario_id}: {e}")
 
 def check_si_ya_se_ofrecio_cierre(usuario_id, producto):
     try:
@@ -220,18 +229,25 @@ def generar_respuesta_persuasiva(usuario_id, mensaje_usuario, producto):
     historial = construir_contexto_conversacional(usuario_id)
 
     # Buscar pregunta similar (FAQ) si existe
-    refuerzo_semantico, score_similitud, origen_vector = buscar_pregunta_similar(mensaje_usuario, producto)
+    refuerzo_semantico, score_similitud, origen_vector, beneficios_faq = buscar_pregunta_similar(mensaje_usuario, producto)
     mostrar_refuerzo = refuerzo_semantico and origen_vector == "faq"
     refuerzo_txt = f"\n\nRespuesta sugerida basada en preguntas frecuentes: {refuerzo_semantico}" if mostrar_refuerzo else ""
+
+    beneficios_txt = ""
+    if beneficios_faq:
+        beneficios_str = ", ".join(beneficios_faq)
+        beneficios_txt = f"\n\nAl responder, considera resaltar sutilmente estos beneficios clave relacionados con la consulta del usuario, si es pertinente: {beneficios_str}."
 
     # Preparar el prompt dinámico para el usuario
     prompt_usuario = f"""
 Historial reciente de la conversación:
 {historial}
 
-Nuevo mensaje del cliente:
+Considera la siguiente información al formular tu respuesta:
+Mensaje del cliente:
 {mensaje_usuario}
 {refuerzo_txt}
+Contexto adicional de la FAQ (si aplica): {beneficios_txt if mostrar_refuerzo else ""}
 """
 
     try:

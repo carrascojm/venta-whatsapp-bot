@@ -43,11 +43,12 @@ def buscar_pregunta_similar(pregunta_usuario, producto, umbral=0.7):
                 print("✅ Pregunta similar encontrada:")
                 print(f"🧠 Pregunta FAQ: {metadata.get('pregunta')}")
                 print(f"💬 Respuesta sugerida: {metadata.get('respuesta')}")
-                return metadata["respuesta"], score, "faq"
+                beneficios_faq = metadata.get("beneficios_clave", []) # Obtenemos los beneficios
+                return metadata["respuesta"], score, "faq", beneficios_faq
 
         print("❌ Ninguna pregunta similar relevante encontrada.")
-        return None, None, None
+        return None, None, None, [] # Devolvemos lista vacía para beneficios si no hay match
 
     except Exception as e:
         print("❌ Error en la búsqueda semántica:", e)
-        return None, None, None
+        return None, None, None, [] # Devolvemos lista vacía en caso de error
