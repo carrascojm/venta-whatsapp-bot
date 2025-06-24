@@ -21,6 +21,27 @@ embedder = OpenAIEmbeddings(model=EMBEDDING_MODEL, openai_api_key=OPENAI_API_KEY
 # Nuevas FAQs 
 faq_tarjeta_cencopay = [
     {
+        "pregunta": "¿Cuánto me dan de límite?",
+        "respuesta": "¿Qué límite de compra estás necesitando? ¿Querés hacer alguna compra puntual o sería para uso general?",
+        "tags": ["objecion_limite", "calificacion_limite"],
+        "keywords": ["límite", "compra puntual", "uso general"],
+        "beneficios_clave": ["Límites personalizados según tu necesidad"]
+    },
+    {
+        "pregunta": "Ya tengo muchas tarjetas",
+        "respuesta": "Entiendo. ¿Tu preocupación es la cantidad de tarjetas o el costo mensual que implican?",
+        "tags": ["objecion_tarjetas", "pregunta_objecion"],
+        "keywords": ["muchas tarjetas", "costo mensual", "cantidad tarjetas"],
+        "beneficios_clave": []
+    },
+    {
+        "pregunta": "No quiero sumar otro gasto",
+        "respuesta": "Si no representara un gasto adicional, ¿te serviría la Tarjeta Cencopay para realizar tus compras con beneficios exclusivos?",
+        "tags": ["objecion_gasto", "pregunta_objecion"],
+        "keywords": ["no sumar gasto", "gasto adicional"],
+        "beneficios_clave": ["Mantenimiento bonificado sin uso"]
+    },
+    {
         "pregunta": "¿Cómo genero un usuario para ingresar?",
         "respuesta": "Una vez que te bajaste la APP CENCOPAY o ingresaste en la web www.cencopay.com.ar, regístrate siguiendo los pasos, vas a necesitar tener a mano tu DNI físico ya que este va a ser tu usuario.",
         "tags": ["crear_usuario", "registro", "acceso"],

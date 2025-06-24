@@ -216,7 +216,7 @@ def es_usuario_nuevo(usuario_id):
         return False
 
 def generar_respuesta_persuasiva(usuario_id, mensaje_usuario, producto):
-    # Obtener producto activo y su system_prompt
+    # 1. Obtener producto activo y su system_prompt
     producto_info = obtener_producto_activo()
     if not producto_info:
         return "Actualmente no hay un producto activo para ofrecer."
@@ -225,21 +225,45 @@ def generar_respuesta_persuasiva(usuario_id, mensaje_usuario, producto):
     if not system_prompt:
         return "No se encontró un prompt configurado para este producto."
 
-    # Preparar historial de conversación
+    # 2. Obtener el último mensaje del usuario para la Regla de Objeciones
+    historial_ultimo = supabase.table("interacciones") \
+        .select("mensaje") \
+        .eq("usuario_id", usuario_id) \
+        .eq("producto", producto) \
+        .order("created_at", desc=True) \
+        .limit(1) \
+        .execute().data
+    ultimo_mensaje = historial_ultimo[0]["mensaje"] if historial_ultimo else mensaje_usuario
+
+    bloque_objeciones = f"""
+### REGLA DE OBJECIONES:
+Última pregunta del cliente: "{ultimo_mensaje}"
+Si detectás objeción, primero valida con una pregunta de clarificación y esperá su respuesta
+antes de ofrecer beneficios.
+"""
+
+    # 3. Preparar historial de conversación
     historial = construir_contexto_conversacional(usuario_id)
 
-    # Buscar pregunta similar (FAQ) si existe
+    # 4. Buscar pregunta similar (FAQ) si existe
     refuerzo_semantico, score_similitud, origen_vector, beneficios_faq = buscar_pregunta_similar(mensaje_usuario, producto)
     mostrar_refuerzo = refuerzo_semantico and origen_vector == "faq"
-    refuerzo_txt = f"\n\nRespuesta sugerida basada en preguntas frecuentes: {refuerzo_semantico}" if mostrar_refuerzo else ""
+    refuerzo_txt = (
+        f"\n\nRespuesta sugerida basada en preguntas frecuentes: {refuerzo_semantico}"
+        if mostrar_refuerzo else ""
+    )
 
     beneficios_txt = ""
     if beneficios_faq:
         beneficios_str = ", ".join(beneficios_faq)
-        beneficios_txt = f"\n\nAl responder, considera resaltar sutilmente estos beneficios clave relacionados con la consulta del usuario, si es pertinente: {beneficios_str}."
+        beneficios_txt = (
+            f"\n\nAl responder, considera resaltar sutilmente estos beneficios clave relacionados "
+            f"con la consulta del usuario, si es pertinente: {beneficios_str}."
+        )
 
-    # Preparar el prompt dinámico para el usuario
-    prompt_usuario = f"""
+    # 5. Preparar el prompt dinámico para el usuario, inyectando la Regla de Objeciones
+    prompt_usuario = f"""{bloque_objeciones}
+
 Historial reciente de la conversación:
 {historial}
 
@@ -262,12 +286,18 @@ Contexto adicional de la FAQ (si aplica): {beneficios_txt if mostrar_refuerzo el
         )
         mensaje_bot = response.choices[0].message.content.strip()
 
-        # Guardar en Supabase y Pinecone
+        # 6. Guardar en Pinecone y Supabase
         guardar_mensaje_en_pinecone_avanzado(usuario_id, mensaje_usuario, producto=producto)
         guardar_en_historial(usuario_id, mensaje_usuario, tipo="usuario", producto=producto)
-        guardar_en_historial(usuario_id, mensaje_bot, tipo="bot", producto=producto, score_similitud=score_similitud)
+        guardar_en_historial(
+            usuario_id,
+            mensaje_bot,
+            tipo="bot",
+            producto=producto,
+            score_similitud=score_similitud
+        )
 
-        # Detectar intención de compra y registrar lead SIEMPRE
+        # 7. Detectar intención de compra y registrar lead
         decision_compra, _ = detectar_intencion_compra(mensaje_usuario)
         estado_venta = "interesado" if decision_compra else "no_interesado"
         decision_texto = "sí" if decision_compra else "no"
