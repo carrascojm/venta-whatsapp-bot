@@ -59,22 +59,29 @@ def guardar_en_historial(usuario_id, mensaje, tipo, producto, score_similitud=No
     except Exception as e:
         print("❌ Error al guardar en Supabase:", e)
 
-def construir_contexto_conversacional(usuario_id, max_turnos=5):
+def construir_contexto_conversacional(usuario_id, producto=None, max_turnos=5):
+    """
+    Recupera los últimos turnos de la conversación
+    y devuelve solo el texto de cada mensaje, sin labels.
+    """
     try:
-        response = supabase.table("interacciones") \
-            .select("mensaje, tipo") \
-            .eq("usuario_id", usuario_id) \
+        # Base query: filtrar por usuario y opcionalmente por producto
+        query = supabase.table("interacciones") \
+            .select("mensaje") \
+            .eq("usuario_id", usuario_id)
+        if producto:
+            query = query.eq("producto", producto)
+
+        # Traer los últimos max_turnos*2 mensajes en orden cronológico
+        response = query \
             .order("created_at", desc=False) \
             .limit(max_turnos * 2) \
             .execute()
 
-        historial = []
-        for row in response.data:
-            if row["tipo"] == "usuario":
-                historial.append(f"\U0001F464 Usuario: {row['mensaje']}")
-            else:
-                historial.append(f"\U0001F916 Bot: {row['mensaje']}")
-        return "\n".join(historial)
+        # Extraer únicamente el texto de cada mensaje
+        mensajes = [row["mensaje"] for row in response.data]
+        return "\n".join(mensajes)
+
     except Exception as e:
         print("❌ Error al construir contexto:", e)
         return ""
