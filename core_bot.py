@@ -223,6 +223,18 @@ def es_usuario_nuevo(usuario_id):
         return False
 
 def generar_respuesta_persuasiva(usuario_id, mensaje_usuario, producto):
+    # 0. Si el usuario responde “sí” tras un cierre ofrecido, vamos directo al cierre ———————
+    afirmaciones = {"si","sí","dale","claro","me interesa","vamos","confirmo"}
+    # Verifico si antes ya se ofreció el cierre
+    if mensaje_usuario.strip().lower() in afirmaciones and check_si_ya_se_ofrecio_cierre(usuario_id, producto):
+        respuesta_cierre = (
+            "¡Genial! Para completar el alta necesito que me confirmes tu DNI, tu sexo y tu fecha de nacimiento."
+        )
+        # Registro en historial
+        guardar_en_historial(usuario_id, mensaje_usuario, tipo="usuario", producto=producto)
+        guardar_en_historial(usuario_id, respuesta_cierre, tipo="bot", producto=producto, respuesta_final_ofrecida=True)
+        return respuesta_cierre
+    
     # 1. Obtener producto activo y su system_prompt
     producto_info = obtener_producto_activo()
     if not producto_info:
