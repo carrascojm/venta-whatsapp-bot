@@ -226,13 +226,29 @@ def generar_respuesta_persuasiva(usuario_id, mensaje_usuario, producto):
     # 0. Si el usuario responde “sí” tras un cierre ofrecido, vamos directo al cierre ———————
     afirmaciones = {"si","sí","dale","claro","me interesa","vamos","confirmo"}
     # Verifico si antes ya se ofreció el cierre
-    if mensaje_usuario.strip().lower() in afirmaciones and check_si_ya_se_ofrecio_cierre(usuario_id, producto):
+    last_bot = supabase.table("interacciones") \
+        .select("mensaje, respuesta_final_ofrecida") \
+        .eq("usuario_id", usuario_id) \
+        .eq("producto", producto) \
+        .eq("tipo", "bot") \
+        .order("created_at", desc=True) \
+        .limit(1) \
+        .execute().data
+    if last_bot:
+        ofrecio_cierre = bool(last_bot[0].get("respuesta_final_ofrecida"))
+    else:
+        ofrecio_cierre = False
+
+    if mensaje_usuario.strip().lower() in afirmaciones and ofrecio_cierre:
         respuesta_cierre = (
             "¡Genial! Para completar el alta necesito que me confirmes tu DNI, tu sexo y tu fecha de nacimiento."
         )
-        # Registro en historial
         guardar_en_historial(usuario_id, mensaje_usuario, tipo="usuario", producto=producto)
-        guardar_en_historial(usuario_id, respuesta_cierre, tipo="bot", producto=producto, respuesta_final_ofrecida=True)
+        guardar_en_historial(
+            usuario_id, respuesta_cierre,
+            tipo="bot", producto=producto,
+            respuesta_final_ofrecida=True
+        )
         return respuesta_cierre
     
     # 1. Obtener producto activo y su system_prompt
