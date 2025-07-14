@@ -137,6 +137,15 @@ def obtener_producto_activo():
         return None
 
 
+def es_usuario_nuevo(usuario_id):
+    try:
+        resp = supabase.table("interacciones").select("id").eq("usuario_id", usuario_id).limit(1).execute().data
+        return len(resp) == 0
+    except Exception as e:
+        print("❌ Error verificando usuario:", e)
+        return False
+
+
 def generar_respuesta_persuasiva(usuario_id, mensaje_usuario, producto):
     # 0. Cierre tras confirmación explícita
     afirmaciones = {"si","sí","dale","claro","me interesa","vamos","confirmo"}
@@ -186,11 +195,9 @@ def generar_respuesta_persuasiva(usuario_id, mensaje_usuario, producto):
         client = OpenAI(api_key=OPENAI_API_KEY)
         res = client.chat.completions.create(model="gpt-4", messages=[{"role":"system","content":system_prompt},{"role":"user","content":user_prompt}], temperature=0.7)
         bot_msg = res.choices[0].message.content.strip()
-        # Guardar interacciones
         guardar_mensaje_en_pinecone_avanzado(usuario_id, mensaje_usuario, producto=producto)
-        guardar_en_historial(usuario_id, mensaje_usuario, "usuario", producto, score_semilitud=score)
+        guardar_en_historial(usuario_id, mensaje_usuario, "usuario", producto, score_similitud=score)
         guardar_en_historial(usuario_id, bot_msg, "bot", producto, score_similitud=score)
-        # Registrar venta simulada
         dec_comp, _ = detectar_intencion_compra(mensaje_usuario)
         estado = "interesado" if dec_comp else "no_interesado"
         registrar_venta_simulada(usuario_id, producto, estado, "sí" if dec_comp else "no")
