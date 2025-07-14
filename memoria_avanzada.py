@@ -8,13 +8,11 @@ from utils import generar_id_deterministico
 
 load_dotenv()
 
-# Configuración
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
 
-# Inicialización
 client = OpenAI(api_key=OPENAI_API_KEY)
 embedder = OpenAIEmbeddings(model=EMBEDDING_MODEL, openai_api_key=OPENAI_API_KEY)
 pc = Pinecone(api_key=PINECONE_API_KEY)

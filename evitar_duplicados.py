@@ -1,7 +1,5 @@
 import hashlib
 
-# === 🔐 Funciones de control anti-duplicado ===
-
 def hash_mensaje(texto):
     return hashlib.sha256(texto.strip().lower().encode()).hexdigest()
 
